@@ -37,8 +37,10 @@
  *         Vcc  Vcc       Vcc = 3.3 V
  *          |    |         |
  *         4K7  4K7       1k0  pull up resistors (3K3 to 10K Ohm)
- *          |    |   +-|<|-+   LED red
- *          |    |   |
+ *          |    |   +-|<|-+   LED red (led not possible when pir is installed)
+ *          |    |                                           +--------+
+ *          |    |   +---------------------------------------| pir    |
+ *          |    |   |                                       +--------+
  * GPIO0  - +--------+---o |
  *               |         | -> | push button switch for WPS function
  * GPIO2  -------+-------o |
@@ -52,13 +54,20 @@
  */
 
 #include <ESP8266WiFi.h>
+#include <PubSubClient.h>
 
 bool debug = false;  // enable either one
 //bool debug = true:
 
+// mqtt
+const char* mqtt_server = "mqtt_server";
+WiFiClient espClient;
+PubSubClient client(espClient);
+
 //how many clients should be able to telnet to this ESP8266
 #define MAX_SRV_CLIENTS 1
 
+// old: telnet
 WiFiServer server(23);  //  port 23 = telnet
 WiFiClient serverClients[MAX_SRV_CLIENTS];
 
@@ -80,7 +89,22 @@ bool startWPSPBC() {
   }
   return wpsSuccess; 
 }
-
+// The callback method for received mqtt messages
+void callback(char* topic, byte* payload, unsigned int length) {
+ Serial.print("Message arrived [");
+ Serial.print(topic);
+ Serial.print("] ");
+ for (int i=0;i<length;i++) {
+  char receivedChar = (char)payload[i];
+  Serial.print(receivedChar);
+  // Carl if (receivedChar == '0')
+  // ESP8266 Huzzah outputs are "reversed"
+  // Carl digitalWrite(ledPin, HIGH);
+  // Carl if (receivedChar == '1')
+   // Carl digitalWrite(ledPin, LOW);
+  }
+  Serial.println();
+}
 void setup() {
   Serial.begin(9600);        // adopt baud rate to your needs
   //Serial.begin(115200); 
@@ -103,7 +127,7 @@ void setup() {
   } else {
     // WPS button I/O setup
     pinMode(0,OUTPUT);         // Use GPIO0
-    digitalWrite(0,LOW);       // for hardware safe operation.
+    digitalWrite(0,LOW);       // for hardware safe operation. (led on if installed)
     pinMode(2, INPUT_PULLUP);  // Push Button for GPIO2 active LOW
     Serial.printf("\nCould not connect to WiFi. state='%d'\n", status);
     Serial.println("Please press WPS button on your router, until mode is indicated.");
@@ -125,13 +149,9 @@ void setup() {
     }
   } 
 
-  server.begin();  // telnet server
-  server.setNoDelay(true);
-  if (debug) {
-    Serial.print("\nReady! Use 'telnet ");
-    Serial.print(WiFi.localIP());
-    Serial.println(" port 23' to connect");
-  }
+ client.setServer(mqtt_server, 1883);
+ client.setCallback(callback);
+  
 }
 
 // from Arduino/hardware/esp8266com/esp8266/libraries/ESP8266WiFi/examples/
@@ -139,7 +159,15 @@ void setup() {
 
 void loop() {
   uint8_t i;
+  uint8_t pir_status; // HIGH or LOW
   //check if there are any new clients
+
+  // get pir status
+  pinMode(0, INPUT);  // pir status
+  pir_status=digitalRead(0);
+
+  
+  
   if (server.hasClient()) {
     for(i = 0; i < MAX_SRV_CLIENTS; i++) {
       //find free/disconnected spot
